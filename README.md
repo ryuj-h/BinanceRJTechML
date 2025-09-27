@@ -11,7 +11,7 @@ Continuous Binance BTCUSDT futures order book and trade capture designed for mac
 
 ## Requirements
 - Python 3.10+
-- `aiohttp`, `pyarrow`
+- `aiohttp`, `pyarrow`, `numpy`, `pandas`, `torch`, `tqdm`
 
 Install Python dependencies:
 
@@ -51,6 +51,21 @@ data/
 
 Order book rows include the applied diff updates plus the full snapshot that anchors the stream. Trade rows mirror Binance`s aggregated trade schema while adding a local wall-clock timestamp.
 
+## TCN Training Pipeline
+
+```bash
+python scripts/train_tcn.py \
+    --parquet-path data/processed/orderbook_all_top25_100ms_a.parquet \
+    --features best_bid_price best_ask_price mid_price spread bid_volume_top ask_volume_top volume_imbalance \
+    --targets mid_price \
+    --input-length 100 \
+    --forecast-horizon 10 \
+    --epochs 25 \
+    --batch-size 512
+```
+
+The script builds normalized sliding windows (100 ticks in, 10 ticks out) and trains a Temporal Convolutional Network forecaster. Model checkpoints and normalization stats land in `models/` by default. Override the feature or target lists to experiment with deeper ladder levels or custom engineered signals. Training uses tqdm progress bars so you can monitor epoch and batch completion.
+
 ## Extensibility
 
 - Additional symbols: launch multiple instances or extend the CLI to accept a list of pairs.
@@ -61,3 +76,4 @@ Order book rows include the applied diff updates plus the full snapshot that anc
 
 - Network interruptions trigger exponential backoff with automatic resubscription.
 - If you switch sinks/formats, ensure downstream consumers handle the corresponding schema.
+
