@@ -56,3 +56,36 @@ def trades_schema():
             ("is_buyer_maker", pa.bool_()),
         ]
     )
+
+
+@lru_cache(maxsize=None)
+def orderbook_feature_schema(levels_per_side: int):
+    pa = _require_pyarrow()
+    levels = max(1, int(levels_per_side))
+    fields = [
+        ("event_time", pa.int64()),
+        ("received_time", pa.timestamp("ms", tz="UTC")),
+        ("symbol", pa.string()),
+        ("update_id", pa.int64()),
+        ("mid_price", pa.float64()),
+        ("spread", pa.float64()),
+        ("spread_bps", pa.float64()),
+        ("best_bid_price", pa.float64()),
+        ("best_bid_qty", pa.float64()),
+        ("best_ask_price", pa.float64()),
+        ("best_ask_qty", pa.float64()),
+        ("window_lower_price", pa.float64()),
+        ("window_upper_price", pa.float64()),
+        ("bid_window_depth", pa.float64()),
+        ("ask_window_depth", pa.float64()),
+        ("depth_imbalance", pa.float64()),
+        ("feature_window_bps", pa.float64()),
+    ]
+    for idx in range(levels):
+        fields.extend([
+            (f"bid_px_{idx}", pa.float64()),
+            (f"bid_qty_{idx}", pa.float64()),
+            (f"ask_px_{idx}", pa.float64()),
+            (f"ask_qty_{idx}", pa.float64()),
+        ])
+    return pa.schema(fields)

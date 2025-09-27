@@ -16,7 +16,7 @@ if str(SRC_PATH) not in sys.path:
 
 from binance_data.config import CollectorConfig, SinkConfig
 from binance_data.orderbook import OrderBookCollector
-from binance_data.schemas import orderbook_schema, trades_schema
+from binance_data.schemas import orderbook_feature_schema, trades_schema
 from binance_data.storage import JsonlSink, ParquetSink
 from binance_data.trades import TradeCollector
 
@@ -40,6 +40,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--backoff", type=float, default=2.0, help="Initial reconnect backoff")
     parser.add_argument("--max-backoff", type=float, default=60.0, help="Maximum reconnect backoff")
     parser.add_argument("--max-update-gap", type=int, default=100, help="Maximum tolerable gap in update IDs")
+    parser.add_argument("--feature-levels-per-side", type=int, default=10, help="Depth levels per side to persist around the mid price")
+    parser.add_argument("--feature-window-bps", type=float, default=50.0, help="Half-window around the mid price (in basis points) for depth aggregation")
     parser.add_argument(
         "--log-level",
         default="INFO",
@@ -80,13 +82,13 @@ def create_sink(sink_cfg: SinkConfig, dataset: str, schema: Any | None) -> Parqu
 
 async def run_collectors(cfg: CollectorConfig) -> None:
     if cfg.sink.format == "parquet":
-        orderbook_schema_obj = orderbook_schema()
+        orderbook_schema_obj = orderbook_feature_schema(cfg.feature_levels_per_side)
         trades_schema_obj = trades_schema()
     else:
         orderbook_schema_obj = None
         trades_schema_obj = None
 
-    orderbook_sink = create_sink(cfg.sink, "orderbook", orderbook_schema_obj)
+    orderbook_sink = create_sink(cfg.sink, "orderbook_features", orderbook_schema_obj)
     trades_sink = create_sink(cfg.sink, "trades", trades_schema_obj)
     orderbook = OrderBookCollector(cfg, orderbook_sink)
     trades = TradeCollector(cfg, trades_sink)
@@ -150,6 +152,8 @@ def main() -> None:
         reconnect_backoff_seconds=args.backoff,
         max_backoff_seconds=args.max_backoff,
         max_update_gap=args.max_update_gap,
+        feature_levels_per_side=args.feature_levels_per_side,
+        feature_window_bps=args.feature_window_bps,
     )
 
     try:

@@ -4,7 +4,6 @@ import asyncio
 import json
 import logging
 import time
-import uuid
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from pathlib import Path
@@ -28,6 +27,7 @@ class AsyncDataSink(ABC):
     @abstractmethod
     async def close(self) -> None:
         raise NotImplementedError
+
 
 
 class ParquetSink(AsyncDataSink):
@@ -60,6 +60,9 @@ class ParquetSink(AsyncDataSink):
         self._buffer: List[Dict[str, Any]] = []
         self._last_flush = time.monotonic()
         self._lock = asyncio.Lock()
+        self._current_date_key: Optional[str] = None
+        self._current_writer: Optional[Any] = None
+        self._current_file_path: Optional[Path] = None
 
     async def write(self, record: Dict[str, Any]) -> None:
         async with self._lock:
@@ -73,6 +76,7 @@ class ParquetSink(AsyncDataSink):
 
     async def close(self) -> None:
         await self.flush()
+        await asyncio.to_thread(self._close_writer)
 
     def _should_flush_locked(self) -> bool:
         if len(self._buffer) >= self._max_batch_size:
@@ -90,15 +94,64 @@ class ParquetSink(AsyncDataSink):
 
     def _write_records(self, records: List[Dict[str, Any]]) -> None:
         timestamp = datetime.now(timezone.utc)
-        partition_dir = self._root / self._dataset_name / f"date={timestamp:%Y-%m-%d}"
+        date_key = f"date={timestamp:%Y-%m-%d}"
+        partition_dir = self._root / self._dataset_name / date_key
         partition_dir.mkdir(parents=True, exist_ok=True)
-        file_name = (
-            f"{self._dataset_name}_{timestamp:%Y%m%dT%H%M%S%f}_{uuid.uuid4().hex[:8]}.parquet"
-        )
-        table = self._pa.Table.from_pylist(records, schema=self._schema)
+        file_name = f"{self._dataset_name}_{timestamp:%Y%m%d}.parquet"
         file_path = partition_dir / file_name
-        self._pq.write_table(table, file_path)
+        writer = self._ensure_writer(date_key, file_path)
+        table = self._pa.Table.from_pylist(records, schema=self._schema)
+        writer.write_table(table)
         LOGGER.debug("Wrote %s records to %s", len(records), file_path)
+
+    def _ensure_writer(self, date_key: str, file_path: Path) -> Any:
+        if self._current_writer is not None and self._current_date_key == date_key:
+            return self._current_writer
+
+        self._close_writer()
+        backup_path: Optional[Path] = None
+        writer: Optional[Any] = None
+
+        try:
+            if file_path.exists():
+                backup_path = file_path.with_suffix(file_path.suffix + ".bak")
+                if backup_path.exists():
+                    backup_path.unlink()
+                file_path.rename(backup_path)
+
+            writer = self._pq.ParquetWriter(file_path, self._schema)
+            if backup_path is not None:
+                parquet_file = self._pq.ParquetFile(backup_path)
+                for row_group_index in range(parquet_file.num_row_groups):
+                    table_fragment = parquet_file.read_row_group(row_group_index)
+                    writer.write_table(table_fragment)
+                backup_path.unlink()
+
+            self._current_writer = writer
+            self._current_date_key = date_key
+            self._current_file_path = file_path
+            return writer
+        except Exception:
+            if writer is not None:
+                writer.close()
+            if file_path.exists():
+                file_path.unlink()
+            if backup_path is not None and backup_path.exists():
+                backup_path.rename(file_path)
+            self._current_writer = None
+            self._current_date_key = None
+            self._current_file_path = None
+            raise
+
+    def _close_writer(self) -> None:
+        if self._current_writer is not None:
+            try:
+                self._current_writer.close()
+            finally:
+                self._current_writer = None
+                self._current_date_key = None
+                self._current_file_path = None
+
 
 
 class JsonlSink(AsyncDataSink):

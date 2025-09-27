@@ -30,6 +30,8 @@ class CollectorConfig:
     reconnect_backoff_seconds: float = 2.0
     max_backoff_seconds: float = 60.0
     max_update_gap: int = 100
+    feature_levels_per_side: int = 10
+    feature_window_bps: float = 50.0
 
     @property
     def normalized_symbol(self) -> str:

@@ -11,7 +11,7 @@ Continuous Binance BTCUSDT futures order book and trade capture designed for mac
 
 ## Requirements
 - Python 3.10+
-- `aiohttp`, `pyarrow`, `numpy`, `pandas`, `torch`, `tqdm`
+- `aiohttp`, `pyarrow`, `numpy`, `pandas`, `torch`, `tqdm`, `dearpygui`
 
 Install Python dependencies:
 
@@ -54,6 +54,19 @@ Order book rows include the applied diff updates plus the full snapshot that anc
 ## TCN Training Pipeline
 
 ```bash
+python scripts/train_tcn_long.py \
+    --parquet-path data/processed/orderbook_all_top25_100ms_a.parquet \
+    --features best_bid_price best_ask_price mid_price spread bid_volume_top ask_volume_top volume_imbalance \
+    --targets mid_price \
+    --input-length 1000 \
+    --forecast-horizon 100 \
+    --epochs 30 \
+    --batch-size 128
+```
+
+This preset trains on approximately 100 seconds (1,000 ticks) of context and forecasts the next 10 seconds (100 ticks). Use `--hidden-channels` or `--stride` to tune capacity and memory usage.
+
+```bash
 python scripts/train_tcn.py \
     --parquet-path data/processed/orderbook_all_top25_100ms_a.parquet \
     --features best_bid_price best_ask_price mid_price spread bid_volume_top ask_volume_top volume_imbalance \
@@ -65,6 +78,30 @@ python scripts/train_tcn.py \
 ```
 
 The script builds normalized sliding windows (100 ticks in, 10 ticks out) and trains a Temporal Convolutional Network forecaster. Model checkpoints and normalization stats land in `models/` by default. Override the feature or target lists to experiment with deeper ladder levels or custom engineered signals. Training uses tqdm progress bars so you can monitor epoch and batch completion.
+
+## Live Validation
+
+```bash
+python scripts/validate_tcn_live.py \
+    --checkpoint models/tcn_forecaster.pt \
+    --symbol BTCUSDT \
+    --device cuda
+```
+
+The validator streams the Binance depth feed, reuses the saved normalization stats, and reports cumulative MAE per horizon while data flows. Adjust `--report-interval` to control how often metrics print.
+
+## Live Visualization (DearPyGui)
+
+```bash
+python scripts/visualize_tcn_live.py \
+    --checkpoint models/tcn_forecaster.pt \
+    --symbol BTCUSDT \
+    --device cuda \
+    --display-horizons 1 5 \
+    --max-points 600
+```
+
+The GUI keeps a rolling plot of the actual mid price and the requested forecast horizons (default h1). MAE per horizon updates in real time, and the window automatically reconnects after snapshot resyncs. Close the window or hit Ctrl+C in the terminal to stop the stream.
 
 ## Extensibility
 
